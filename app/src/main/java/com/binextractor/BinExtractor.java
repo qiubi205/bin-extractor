@@ -8,19 +8,15 @@ import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Extracts .bin archive files. Supports:
- * - Simple concatenated header + data blobs
- * - Tar-like archives (detected by ustar magic)
- * - Raw fallback (copy as-is)
- */
 public class BinExtractor {
+
+    private static final String RPGM_MAGIC = "RPGM";
+    private static final int MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 
     public static class ExtractedFile {
         public final String name;
         public final long size;
         public final byte[] data;
-
         ExtractedFile(String name, long size, byte[] data) {
             this.name = name;
             this.size = size;
@@ -28,202 +24,251 @@ public class BinExtractor {
         }
     }
 
-    private static final int MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB per file
-
-    /**
-     * Analyze and extract the .bin file.
-     * Returns a list of extracted files.
-     */
     public static List<ExtractedFile> extract(File binFile) throws IOException {
-        List<ExtractedFile> result = new ArrayList<>();
+        byte[] header = readBytes(binFile, 0, 16);
+        if (header == null || header.length < 4) {
+            return fallbackCopy(binFile);
+        }
 
-        byte[] magic = readMagic(binFile);
-        if (magic == null) return result;
+        String magic = new String(header, 0, 4, "ASCII");
+        if (magic.equals(RPGM_MAGIC)) {
+            return extractRPGM(binFile, header);
+        }
 
-        // Try tar format
-        if (isTarFormat(magic, binFile)) {
+        // Try tar
+        if (isTar(binFile)) {
             return extractTar(binFile);
         }
 
-        // Try custom header format: 4-byte name length + name + 4-byte data length + data
-        try {
-            List<ExtractedFile> customResult = extractCustomFormat(binFile);
-            if (!customResult.isEmpty()) {
-                return customResult;
-            }
-        } catch (Exception ignored) {
+        // Try custom format
+        List<ExtractedFile> customResult = extractCustom(binFile);
+        if (!customResult.isEmpty()) return customResult;
+
+        return fallbackCopy(binFile);
+    }
+
+    // ========== RPGM 格式解包 ==========
+    // 魔数 "RPGM" (4字节)
+    // 4字节: 未知（版本？）
+    // 4字节: 图片类型 (03=PNG?)
+    // 之后跟着实际图片数据
+    private static List<ExtractedFile> extractRPGM(File file, byte[] header) throws IOException {
+        List<ExtractedFile> result = new ArrayList<>();
+
+        // 跳过 RPGM 头部 - 看起来是 16 字节
+        // 魔数4 + 未知4 + 类型4 + 额外4
+        int headerSize = 16;
+
+        // 检查第二个块
+        long fileLen = file.length();
+        if (fileLen <= headerSize) {
+            return fallbackCopy(file);
         }
 
-        // Fallback: just copy the file as-is
-        byte[] data = readAllBytes(binFile, MAX_FILE_SIZE);
-        result.add(new ExtractedFile(binFile.getName(), data.length, data));
+        // 从 headerSize 开始读取后续数据块
+        int offset = headerSize;
+        int index = 0;
+
+        while (offset < fileLen) {
+            // 每块开头可能有额外的数据块头
+            // 读4字节块长度
+            if (offset + 4 > fileLen) break;
+            byte[] lenBytes = readBytes(file, offset, 4);
+            if (lenBytes == null) break;
+
+            int chunkLen = ((lenBytes[0] & 0xFF) |
+                    ((lenBytes[1] & 0xFF) << 8) |
+                    ((lenBytes[2] & 0xFF) << 16) |
+                    ((lenBytes[3] & 0xFF) << 24));
+
+            if (chunkLen <= 0 || chunkLen > fileLen - offset - 4) {
+                // 不是块长度头，尝试把剩余全部读成一个块
+                byte[] rawData = readBytes(file, offset, (int)(fileLen - offset));
+                if (rawData != null && rawData.length > 0) {
+                    String ext = detectImageExt(rawData);
+                    result.add(new ExtractedFile("image_" + index + ext, rawData.length, rawData));
+                    index++;
+                }
+                break;
+            }
+
+            offset += 4;
+            if (offset + chunkLen > fileLen) {
+                chunkLen = (int)(fileLen - offset);
+            }
+
+            byte[] chunkData = readBytes(file, offset, chunkLen);
+            if (chunkData == null) break;
+
+            // 检测图片类型
+            String ext = detectImageExt(chunkData);
+            result.add(new ExtractedFile("image_" + index + ext, chunkData.length, chunkData));
+            index++;
+            offset += chunkLen;
+        }
+
+        if (result.isEmpty()) {
+            // 尝试直接跳过 16 字节头读剩余全部
+            byte[] remaining = readBytes(file, headerSize, (int)(fileLen - headerSize));
+            if (remaining != null && remaining.length > 0) {
+                String ext = detectImageExt(remaining);
+                result.add(new ExtractedFile("extracted" + ext, remaining.length, remaining));
+            }
+        }
+
+        // 如果结果里的文件不是标准图片格式，加个 .bin 后缀保底
+        for (ExtractedFile f : result) {
+            if (!f.name.contains(".")) {
+                // 保持原名，不自动加后缀
+            }
+        }
+
         return result;
     }
 
-    private static byte[] readMagic(File file) throws IOException {
-        if (file.length() < 4) return null;
-        byte[] buf = new byte[Math.min(512, (int) file.length())];
-        try (FileInputStream fis = new FileInputStream(file)) {
-            int read = fis.read(buf);
-            if (read < 4) return null;
-            if (read < buf.length) {
-                byte[] trimmed = new byte[read];
-                System.arraycopy(buf, 0, trimmed, 0, read);
-                return trimmed;
-            }
-            return buf;
-        }
+    private static String detectImageExt(byte[] data) {
+        if (data.length < 4) return ".bin";
+        // PNG
+        if ((data[0] & 0xFF) == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G') return ".png";
+        // JPEG
+        if ((data[0] & 0xFF) == 0xFF && (data[1] & 0xFF) == 0xD8) return ".jpg";
+        // GIF
+        if (data[0] == 'G' && data[1] == 'I' && data[2] == 'F') return ".gif";
+        // BMP
+        if (data[0] == 'B' && data[1] == 'M') return ".bmp";
+        // WEBP
+        if (data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F') return ".webp";
+        return ".bin";
     }
 
-    private static boolean isTarFormat(byte[] magic, File file) {
-        // ustar magic at offset 257 in a tar header block (512 bytes)
+    // ========== Tar 解包 ==========
+    private static boolean isTar(File file) throws IOException {
         if (file.length() < 512) return false;
-        // Check for "ustar" at offset 257
-        if (magic.length > 262 &&
-                magic[257] == 'u' && magic[258] == 's' &&
-                magic[259] == 't' && magic[260] == 'a' &&
-                magic[261] == 'r') {
-            return true;
-        }
-        // Also check at the beginning of the file
-        try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
-            byte[] header = new byte[512];
-            raf.readFully(header);
-            if (header.length > 262 &&
-                    header[257] == 'u' && header[258] == 's' &&
-                    header[259] == 't' && header[260] == 'a' &&
-                    header[261] == 'r') {
-                return true;
-            }
-        } catch (IOException e) {
-            return false;
-        }
-        return false;
+        byte[] buf = readBytes(file, 257, 5);
+        if (buf == null) return false;
+        String ustar = new String(buf, "ASCII");
+        return ustar.equals("ustar");
     }
 
     private static List<ExtractedFile> extractTar(File file) throws IOException {
         List<ExtractedFile> result = new ArrayList<>();
         try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
             while (raf.getFilePointer() < raf.length()) {
-                // Read 512-byte tar header
                 byte[] header = new byte[512];
                 if (raf.read(header) < 512) break;
-
-                // Check for end-of-archive (all zero blocks)
                 boolean allZero = true;
-                for (byte b : header) {
-                    if (b != 0) { allZero = false; break; }
-                }
+                for (byte b : header) { if (b != 0) { allZero = false; break; } }
                 if (allZero) break;
 
-                // Read name (max 100 bytes, null-terminated)
                 StringBuilder nameSb = new StringBuilder();
                 for (int i = 0; i < 100; i++) {
                     if (header[i] == 0) break;
-                    nameSb.append((char) (header[i] & 0xFF));
+                    nameSb.append((char)(header[i] & 0xFF));
                 }
                 String name = nameSb.toString().trim();
                 if (name.isEmpty()) continue;
 
-                // Read size (octal, bytes 124-135)
                 String sizeStr = "";
                 for (int i = 124; i < 136; i++) {
                     if (header[i] == 0 || header[i] == ' ') break;
-                    sizeStr += (char) (header[i] & 0xFF);
+                    sizeStr += (char)(header[i] & 0xFF);
                 }
                 long size = 0;
-                try {
-                    size = Long.parseLong(sizeStr.trim(), 8);
-                } catch (NumberFormatException e) {
-                    continue;
-                }
-
-                if (size > MAX_FILE_SIZE) {
-                    throw new IOException("File too large in tar: " + name + " (" + size + " bytes)");
-                }
+                try { size = Long.parseLong(sizeStr.trim(), 8); } catch (NumberFormatException e) { continue; }
+                if (size > MAX_FILE_SIZE) throw new IOException("Tar 内文件过大: " + name);
 
                 if (size > 0) {
                     byte[] data = new byte[(int) size];
-                    int offset = 0;
-                    while (offset < size) {
-                        int read = raf.read(data, offset, (int) Math.min(512, size - offset));
+                    int off = 0;
+                    while (off < size) {
+                        int read = raf.read(data, off, (int) Math.min(512, size - off));
                         if (read < 0) break;
-                        offset += read;
+                        off += read;
                     }
                     result.add(new ExtractedFile(name, size, data));
                 }
-
-                // Skip padding to next 512-byte boundary
                 long padding = (512 - (size % 512)) % 512;
-                if (padding > 0) {
-                    raf.skipBytes((int) padding);
-                }
+                if (padding > 0) raf.skipBytes((int) padding);
             }
         }
         return result;
     }
 
-    private static List<ExtractedFile> extractCustomFormat(File file) throws IOException {
+    // ========== 自定义格式 ==========
+    private static List<ExtractedFile> extractCustom(File file) throws IOException {
         List<ExtractedFile> result = new ArrayList<>();
         try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
             while (raf.getFilePointer() < raf.length()) {
-                // Read name length (4 bytes, little-endian)
                 byte[] lenBuf = new byte[4];
                 if (raf.read(lenBuf) < 4) break;
-                int nameLen = (lenBuf[0] & 0xFF) |
-                        ((lenBuf[1] & 0xFF) << 8) |
-                        ((lenBuf[2] & 0xFF) << 16) |
-                        ((lenBuf[3] & 0xFF) << 24);
+                int nameLen = (lenBuf[0] & 0xFF) | ((lenBuf[1] & 0xFF) << 8) |
+                        ((lenBuf[2] & 0xFF) << 16) | ((lenBuf[3] & 0xFF) << 24);
+                if (nameLen <= 0 || nameLen > 1024) { raf.seek(0); return result; }
 
-                if (nameLen <= 0 || nameLen > 1024) {
-                    // Not our format, rewind and stop
-                    raf.seek(0);
-                    return result;
-                }
-
-                // Read name
                 byte[] nameBytes = new byte[nameLen];
                 if (raf.read(nameBytes) < nameLen) break;
                 String name = new String(nameBytes, "UTF-8");
 
-                // Read data length (4 bytes, little-endian)
                 if (raf.read(lenBuf) < 4) break;
-                int dataLen = (lenBuf[0] & 0xFF) |
-                        ((lenBuf[1] & 0xFF) << 8) |
-                        ((lenBuf[2] & 0xFF) << 16) |
-                        ((lenBuf[3] & 0xFF) << 24);
+                int dataLen = (lenBuf[0] & 0xFF) | ((lenBuf[1] & 0xFF) << 8) |
+                        ((lenBuf[2] & 0xFF) << 16) | ((lenBuf[3] & 0xFF) << 24);
+                if (dataLen <= 0 || dataLen > MAX_FILE_SIZE) { raf.seek(0); return result; }
 
-                if (dataLen <= 0 || dataLen > MAX_FILE_SIZE) {
-                    raf.seek(0);
-                    return result;
-                }
-
-                // Read data
                 byte[] data = new byte[dataLen];
                 if (raf.read(data) < dataLen) break;
-
                 result.add(new ExtractedFile(name, dataLen, data));
             }
-        }
-        if (result.isEmpty()) {
-            // Not our format
-            return result;
         }
         return result;
     }
 
-    private static byte[] readAllBytes(File file, int maxSize) throws IOException {
-        long len = file.length();
-        if (len > maxSize) {
-            throw new IOException("File too large: " + len + " bytes (max " + maxSize + ")");
+    // ========== 兜底 ==========
+    private static List<ExtractedFile> fallbackCopy(File file) throws IOException {
+        List<ExtractedFile> result = new ArrayList<>();
+        byte[] data = readAll(file, MAX_FILE_SIZE);
+        String ext = detectImageExt(data);
+        String name = file.getName();
+        // 去掉可能不正确的后缀
+        if (name.toLowerCase().endsWith(".bin") || name.toLowerCase().endsWith(".bin_")) {
+            name = name.substring(0, name.lastIndexOf('.'));
         }
+        // 加正确后缀
+        if (!name.endsWith(ext)) {
+            name += ext;
+        }
+        result.add(new ExtractedFile(name, data.length, data));
+        return result;
+    }
+
+    // ========== 工具函数 ==========
+    private static byte[] readBytes(File file, long offset, int len) throws IOException {
+        if (offset + len > file.length()) {
+            len = (int)(file.length() - offset);
+            if (len <= 0) return null;
+        }
+        byte[] buf = new byte[len];
+        try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+            raf.seek(offset);
+            int read = raf.read(buf);
+            if (read < len) {
+                byte[] trimmed = new byte[read];
+                System.arraycopy(buf, 0, trimmed, 0, read);
+                return trimmed;
+            }
+        }
+        return buf;
+    }
+
+    private static byte[] readAll(File file, int maxSize) throws IOException {
+        long len = file.length();
+        if (len > maxSize) throw new IOException("文件过大: " + len);
         byte[] data = new byte[(int) len];
         try (FileInputStream fis = new FileInputStream(file)) {
-            int offset = 0;
-            while (offset < data.length) {
-                int read = fis.read(data, offset, data.length - offset);
-                if (read < 0) throw new IOException("Unexpected EOF");
-                offset += read;
+            int off = 0;
+            while (off < data.length) {
+                int read = fis.read(data, off, data.length - off);
+                if (read < 0) throw new IOException("意外 EOF");
+                off += read;
             }
         }
         return data;

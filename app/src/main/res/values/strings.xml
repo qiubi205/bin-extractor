@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Bin Extractor</string>
-    <string name="select_bin_file">Select .bin File</string>
-    <string name="select_output">Select Output Directory</string>
-    <string name="extract">Extract</string>
-    <string name="no_file_selected">No file selected</string>
-    <string name="extracting">Extracting…</string>
-    <string name="extract_success">Extraction complete: %1$d files saved to %2$s</string>
-    <string name="extract_failed">Extraction failed: %1$s</string>
-    <string name="unknown_file">Unknown .bin format — saved as raw copy</string>
-    <string name="file_size">File size: %1$s</string>
-    <string name="permission_denied">Storage permission required</string>
+    <string name="select_bin_file">选择 .bin 文件</string>
+    <string name="select_output">选择输出目录</string>
+    <string name="extract">解包</string>
+    <string name="no_file_selected">未选择文件</string>
+    <string name="extracting">正在解包…</string>
+    <string name="extract_success">解包完成：%1$d 个文件已保存到 %2$s</string>
+    <string name="extract_failed">解包失败：%1$s</string>
+    <string name="unknown_file">无法识别的格式 — 已保存为原始副本</string>
+    <string name="file_size">文件大小：%1$s</string>
+    <string name="permission_denied">需要存储权限</string>
 </resources>

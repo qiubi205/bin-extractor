@@ -67,14 +67,14 @@ public class MainActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
                 new AlertDialog.Builder(this)
-                        .setTitle("Storage Permission")
-                        .setMessage("This app needs storage access to read .bin files and save extracted content.")
-                        .setPositiveButton("Grant", (d, w) -> {
+                        .setTitle("存储权限")
+                        .setMessage("此应用需要存储权限来读取 .bin 文件并保存解包内容。")
+                        .setPositiveButton("授权", (d, w) -> {
                             Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
                             intent.setData(Uri.parse("package:" + getPackageName()));
                             startActivityForResult(intent, REQUEST_MANAGE_STORAGE);
                         })
-                        .setNegativeButton("Cancel", null)
+                        .setNegativeButton("取消", null)
                         .show();
             }
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -103,7 +103,7 @@ public class MainActivity extends AppCompatActivity {
             // Fallback to app's external files dir
             outputDir = new File(getExternalFilesDir(null), "extracted").getAbsolutePath();
             new File(outputDir).mkdirs();
-            selectOutputButton.setText("Output: " + outputDir);
+            selectOutputButton.setText("输出目录: " + outputDir);
             updateExtractButton();
         }
     }
@@ -125,15 +125,15 @@ public class MainActivity extends AppCompatActivity {
                 getContentResolver().takePersistableUriPermission(treeUri, takeFlags);
 
                 outputDir = treeUri.toString();
-                selectOutputButton.setText("Output: " + getDisplayPath(treeUri));
+                selectOutputButton.setText("输出目录: " + getDisplayPath(treeUri));
                 updateExtractButton();
             }
         } else if (requestCode == REQUEST_MANAGE_STORAGE) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 if (Environment.isExternalStorageManager()) {
-                    Toast.makeText(this, "Storage permission granted", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "存储权限已授权", Toast.LENGTH_SHORT).show();
                 } else {
-                    Toast.makeText(this, "Storage permission still required", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "仍需要存储权限", Toast.LENGTH_LONG).show();
                 }
             }
         }
@@ -170,7 +170,7 @@ public class MainActivity extends AppCompatActivity {
         selectedFileName = displayName;
         selectedFileSize = size;
 
-        String info = "📄 " + displayName + "\n" + formatFileSize(size);
+        String info = "📄 " + displayName + "\n" + "大小: " + formatFileSize(size);
         fileInfoText.setText(info);
         updateExtractButton();
     }
@@ -247,15 +247,15 @@ public class MainActivity extends AppCompatActivity {
                     progress.dismiss();
                     resultText.setText(logStr);
                     Toast.makeText(MainActivity.this,
-                            "Saved " + savedCount + " files", Toast.LENGTH_LONG).show();
+                            "已保存 " + savedCount + " 个文件", Toast.LENGTH_LONG).show();
                 });
 
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     progress.dismiss();
-                    resultText.setText("❌ Error: " + e.getMessage());
+                    resultText.setText("❌ 错误: " + e.getMessage());
                     Toast.makeText(MainActivity.this,
-                            "Extraction failed", Toast.LENGTH_LONG).show();
+                            "解包失败", Toast.LENGTH_LONG).show();
                 });
             }
         }).start();
@@ -314,9 +314,9 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_PERMISSION) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(this, "Permission granted", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "权限已授予", Toast.LENGTH_SHORT).show();
             } else {
-                Toast.makeText(this, "Storage permission denied", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "存储权限被拒绝", Toast.LENGTH_LONG).show();
             }
         }
     }
