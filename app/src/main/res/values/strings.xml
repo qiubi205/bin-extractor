@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Bin Extractor</string>
+    <string name="select_bin_file">Select .bin File</string>
+    <string name="select_output">Select Output Directory</string>
+    <string name="extract">Extract</string>
+    <string name="no_file_selected">No file selected</string>
+    <string name="extracting">Extracting…</string>
+    <string name="extract_success">Extraction complete: %1$d files saved to %2$s</string>
+    <string name="extract_failed">Extraction failed: %1$s</string>
+    <string name="unknown_file">Unknown .bin format — saved as raw copy</string>
+    <string name="file_size">File size: %1$s</string>
+    <string name="permission_denied">Storage permission required</string>
+</resources>
