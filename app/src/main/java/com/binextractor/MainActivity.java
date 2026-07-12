@@ -19,6 +19,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.documentfile.provider.DocumentFile;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -69,8 +70,7 @@ public class MainActivity extends AppCompatActivity {
                         .setTitle("Storage Permission")
                         .setMessage("This app needs storage access to read .bin files and save extracted content.")
                         .setPositiveButton("Grant", (d, w) -> {
-                            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALLOW_FOREGROUND_SERVICE);
-                            intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                            Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
                             intent.setData(Uri.parse("package:" + getPackageName()));
                             startActivityForResult(intent, REQUEST_MANAGE_STORAGE);
                         })
@@ -265,15 +265,15 @@ public class MainActivity extends AppCompatActivity {
         File[] files = srcDir.listFiles();
         if (files == null) return;
 
-        android.documentfile.DocumentFile destDir = android.documentfile.DocumentFile.fromTreeUri(this, destTreeUri);
+                DocumentFile destDir = DocumentFile.fromTreeUri(this, destTreeUri);
         if (destDir == null) return;
 
         for (File file : files) {
             if (file.isDirectory()) {
-                android.documentfile.DocumentFile subDir = destDir.createDirectory(file.getName());
+                                DocumentFile subDir = destDir.createDirectory(file.getName());
                 if (subDir != null) copyToSaF(file, subDir.getUri());
             } else {
-                android.documentfile.DocumentFile docFile = destDir.createFile("application/octet-stream", file.getName());
+                                        DocumentFile docFile = destDir.createFile("application/octet-stream", file.getName());
                 if (docFile != null) {
                     try (java.io.InputStream is = new java.io.FileInputStream(file);
                          java.io.OutputStream os = getContentResolver().openOutputStream(docFile.getUri())) {
